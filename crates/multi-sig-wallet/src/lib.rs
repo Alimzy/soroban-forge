@@ -2406,6 +2406,9 @@ mod resource_report;
 mod model_check;
 
 #[cfg(test)]
+mod rotation_invariants;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use soroban_forge_test_utils::{MockTarget, MockTargetClient, TestAccounts};
