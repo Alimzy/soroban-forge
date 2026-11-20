@@ -10,6 +10,7 @@
 //! soroban-forge verify --expected <sha256>
 //! soroban-forge verify --manifest provenance-manifest.json
 //! soroban-forge doctor --wasm target/wasm32v1-none/release/contract.wasm
+//! soroban-forge storage-diff --source old.wasm --target new.wasm
 //! ```
 
 mod cli;
@@ -21,6 +22,8 @@ use clap::{Parser, Subcommand};
 use cli::{
     BuildArgs, CompareArgs, DeployArgs, DeployCheckArgs, DoctorArgs, EventsArgs, InspectArgs,
     InvokeArgs, LintArgs, NewArgs, ScaffoldValidateArgs, TestArgs, ValidatePlanArgs, VerifyArgs,
+    BuildArgs, CompareArgs, DeployArgs, DoctorArgs, EventsArgs, InspectArgs, InvokeArgs, LintArgs,
+    NewArgs, ScaffoldValidateArgs, StorageDiffArgs, TestArgs, ValidatePlanArgs, VerifyArgs,
 };
 use decode_failure::DecodeFailureArgs;
 
@@ -62,6 +65,7 @@ pub enum Commands {
     )]
     ValidatePlan(ValidatePlanArgs),
     Compare(CompareArgs),
+    StorageDiff(StorageDiffArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -84,6 +88,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Doctor(args) => commands::doctor::run(args)?,
         Commands::ValidatePlan(args) => commands::plan::run(args)?,
         Commands::Compare(args) => commands::compare::run(args)?,
+        Commands::StorageDiff(args) => commands::storage_diff::run(args)?,
     }
 
     Ok(())
@@ -320,6 +325,40 @@ mod tests {
             ))
         );
         assert_eq!(args.expected.as_deref(), Some("a".repeat(64).as_str()));
+    }
+
+    #[test]
+    fn storage_diff_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "soroban-forge",
+            "storage-diff",
+            "--source",
+            "old.wasm",
+            "--target",
+            "new.wasm",
+            "--json",
+        ])
+        .unwrap();
+
+        let Commands::StorageDiff(args) = cli.command else {
+            panic!("expected storage-diff command");
+        };
+        assert_eq!(args.source, std::path::Path::new("old.wasm"));
+        assert_eq!(args.target, std::path::Path::new("new.wasm"));
+        assert!(args.json);
+    }
+
+    #[test]
+    fn storage_diff_requires_source_and_target() {
+        assert!(Cli::try_parse_from(["soroban-forge", "storage-diff"]).is_err());
+        assert!(
+            Cli::try_parse_from(["soroban-forge", "storage-diff", "--source", "old.wasm",])
+                .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["soroban-forge", "storage-diff", "--target", "new.wasm",])
+                .is_err()
+        );
     }
 
     #[test]
