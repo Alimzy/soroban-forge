@@ -337,5 +337,20 @@ for spec in "${PACKAGES[@]}"; do
   smoke_contract "$key" "$cid" "$name"
 done
 
-write_manifest "passed"
+RECEIPT_PATH="$RECEIPT" python3 - <<'PY_MANIFEST'
+import json
+import os
+
+path = os.environ["RECEIPT_PATH"]
+
+with open(path, encoding="utf-8") as f:
+    manifest = json.load(f)
+
+manifest["status"] = "passed"
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\\n")
+PY_MANIFEST
+
 echo "deployment manifest: $RECEIPT"
