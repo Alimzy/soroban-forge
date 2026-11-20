@@ -10,5 +10,6 @@ pub mod new;
 pub mod plan;
 mod process;
 pub mod scaffold_validate;
+pub mod storage_diff;
 pub mod test;
 pub mod verify;
