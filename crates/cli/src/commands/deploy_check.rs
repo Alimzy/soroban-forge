@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const SUMMARY_SCHEMA: &str = "soroban-forge/deployment-smoke@1";
 const MANIFEST_SCHEMA_PREFIX: &str = "soroban-forge/testnet-deployment@";
@@ -115,12 +114,11 @@ impl StellarCliProbe {
 
 impl DeploymentProbe for StellarCliProbe {
     fn check_code(&self, contract_id: &str) -> Result<()> {
-        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-        let sequence = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let out_file = std::env::temp_dir().join(format!(
-            "soroban-forge-deploy-check-{}-{sequence}.wasm",
-            std::process::id()
-        ));
+        let temp_dir = tempfile::Builder::new()
+            .prefix("soroban-forge-deploy-check-")
+            .tempdir()
+            .context("failed to create temporary directory for contract code fetch")?;
+        let out_file = temp_dir.path().join("contract.wasm");
 
         let mut command = Command::new("stellar");
         command
@@ -132,9 +130,7 @@ impl DeploymentProbe for StellarCliProbe {
             .arg(&self.network)
             .arg("--out-file")
             .arg(&out_file);
-        let result = self.run(command, "contract code fetch");
-        let _ = fs::remove_file(&out_file);
-        result
+        self.run(command, "contract code fetch")
     }
 
     fn check_read_only(&self, contract_id: &str, invocation: &ReadOnlyInvocation) -> Result<()> {
@@ -145,10 +141,12 @@ impl DeploymentProbe for StellarCliProbe {
             .arg("--id")
             .arg(contract_id)
             .arg("--network")
-            .arg(&self.network)
+            .arg(&self.network);
+        if !self.source.trim().is_empty() {
             // Simulation only: never submit or sign a transaction.
-            .arg("--source-account")
-            .arg(&self.source)
+            command.arg("--source-account").arg(&self.source);
+        }
+        command
             .arg("--send")
             .arg("no")
             .arg("--")
@@ -294,6 +292,15 @@ fn check_contract(contract: &ManifestContract, probe: &impl DeploymentProbe) -> 
     };
     if invocation.method.trim().is_empty() {
         report.error = Some("read-only invocation has an empty method".to_owned());
+        return report;
+    }
+    if invocation
+        .args
+        .iter()
+        .any(|arg| arg == UNCONFIGURED_CONTRACT_ID)
+    {
+        report.error =
+            Some("read-only invocation argument is not configured in the manifest".to_owned());
         return report;
     }
     report.method = Some(invocation.method.clone());
@@ -547,6 +554,133 @@ mod tests {
             summary.contracts[0].error.as_deref(),
             Some("contract id is not configured in the manifest")
         );
+    }
+
+    #[test]
+    fn unconfigured_read_only_argument_fails_without_probing() {
+        let manifest = parse_manifest_str(
+            r#"{
+                "contracts": [
+                    {
+                        "key": "marketplace-royalties",
+                        "contract_id": "CMARKETPLACE",
+                        "read_only": {
+                            "method": "get_royalty",
+                            "args": ["--collection", "configured-at-runtime"]
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let probe = FakeProbe::default();
+        let summary = check_manifest(&manifest, &probe, &[], "testnet").unwrap();
+
+        assert_eq!(summary.failed, 1);
+        assert!(probe.calls.borrow().is_empty());
+        assert_eq!(
+            summary.contracts[0].error.as_deref(),
+            Some("read-only invocation argument is not configured in the manifest")
+        );
+    }
+
+    #[test]
+    fn subscription_payments_falls_back_to_get_subscription_count() {
+        let manifest = parse_manifest_str(
+            r#"{
+                "contracts": [
+                    {"key": "subscription-payments", "contract_id": "CSUBSCRIPTION"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let probe = FakeProbe::default();
+        let summary = check_manifest(&manifest, &probe, &[], "testnet").unwrap();
+
+        assert_eq!(summary.passed, 1);
+        assert_eq!(
+            summary.contracts[0].method.as_deref(),
+            Some("get_subscription_count")
+        );
+        assert_eq!(
+            probe.calls.borrow().as_slice(),
+            [
+                "code:CSUBSCRIPTION".to_owned(),
+                "read:CSUBSCRIPTION:get_subscription_count".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn dry_run_manifest_fails_smoke_check_with_unconfigured_placeholders() {
+        let manifest = parse_manifest_str(
+            r#"{
+                "schema": "soroban-forge/testnet-deployment@1",
+                "status": "dry_run",
+                "network": "testnet",
+                "contracts": [
+                    {
+                        "key": "marketplace-royalties",
+                        "contract_id": "configured-at-runtime",
+                        "read_only": {
+                            "method": "get_royalty",
+                            "args": ["--collection", "configured-at-runtime"]
+                        }
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let probe = FakeProbe::default();
+        let summary = check_manifest(&manifest, &probe, &[], "testnet").unwrap();
+
+        assert_eq!(summary.passed, 0);
+        assert_eq!(summary.failed, 1);
+        assert!(probe.calls.borrow().is_empty());
+        assert_eq!(
+            summary.contracts[0].error.as_deref(),
+            Some("contract id is not configured in the manifest")
+        );
+        assert!(ensure_all_passed(&summary).is_err());
+    }
+
+    #[test]
+    fn manifest_preservation_retains_contract_level_metadata() {
+        let raw = r#"{
+            "schema": "soroban-forge/testnet-deployment@1",
+            "status": "passed",
+            "network": "testnet",
+            "contracts": [
+                {
+                    "key": "subscription-payments",
+                    "package": "soroban-forge-subscription-payments",
+                    "name": "SubscriptionPayments",
+                    "contract_id": "CSUBSCRIPTION",
+                    "verification_status": "verified",
+                    "read_only": {
+                        "method": "get_subscription_count",
+                        "args": []
+                    },
+                    "smoke": {
+                        "status": "passed",
+                        "transaction": "tx123",
+                        "events": ["subscribed"],
+                        "state": "subscription active"
+                    }
+                }
+            ]
+        }"#;
+        let manifest = parse_manifest_str(raw).unwrap();
+        let probe = FakeProbe::default();
+        let summary = check_manifest(&manifest, &probe, &[], "testnet").unwrap();
+
+        assert_eq!(summary.passed, 1);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(
+            summary.contracts[0].method.as_deref(),
+            Some("get_subscription_count")
+        );
+        assert!(ensure_all_passed(&summary).is_ok());
     }
 
     #[test]

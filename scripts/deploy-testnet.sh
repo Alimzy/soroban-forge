@@ -125,7 +125,7 @@ packages=[
 ("vesting","soroban-forge-vesting","soroban_forge_vesting.wasm","Vesting","VESTING_ID","get_schedule",["--schedule_id","1"]),
 ("multi-sig-wallet","soroban-forge-multi-sig-wallet","soroban_forge_multi_sig_wallet.wasm","MultiSigWallet","MULTI_SIG_WALLET_ID","get_threshold",[]),
 ("dao-governance","soroban-forge-dao-governance","soroban_forge_dao_governance.wasm","DaoGovernance","DAO_GOVERNANCE_ID","get_bond_config",[]),
-("subscription-payments","soroban-forge-subscription-payments","soroban_forge_subscription_payments.wasm","SubscriptionPayments","SUBSCRIPTION_PAYMENTS_ID","get_subscription",["--subscription_id","1"]),
+("subscription-payments","soroban-forge-subscription-payments","soroban_forge_subscription_payments.wasm","SubscriptionPayments","SUBSCRIPTION_PAYMENTS_ID","get_subscription_count",[]),
 ("marketplace-royalties","soroban-forge-marketplace-royalties","soroban_forge_marketplace_royalties.wasm","MarketplaceRoyalties","MARKETPLACE_ROYALTIES_ID","get_royalty",["--collection","configured-at-runtime"]),
 ]
 import hashlib
@@ -233,9 +233,9 @@ smoke_contract() {
       tx="$(printf '%s\n' "$r" | sed -n '1p')"; subscription="$(printf '%s\n' "$r" | sed -n '2p' | tr -d '[:space:]')"
       [ -n "$subscription" ] || fail "subscription smoke: subscribe returned no subscription id"
       assert_transaction "$contract_name" "$tx"
-      invoke "$id" "$SUBSCRIBER_IDENTITY" subscription get_subscription --subscription_id "$subscription" >/dev/null
+      invoke "$id" "$SUBSCRIBER_IDENTITY" subscription get_subscription_count >/dev/null
       SMOKE_TX="$tx"; SMOKE_EVENTS='["subscribed"]'; SMOKE_STATE="subscription $subscription active"
-      SMOKE_READ_METHOD="get_subscription"; SMOKE_READ_ARGS="[\"--subscription_id\",\"$subscription\"]"
+      SMOKE_READ_METHOD="get_subscription_count"; SMOKE_READ_ARGS='[]'
       ;;
     marketplace-royalties)
       [ -n "${PAYER_IDENTITY:-}" ] && [ -n "${RECIPIENT_IDENTITY:-}" ] || fail "marketplace smoke requires PAYER_IDENTITY, RECIPIENT_IDENTITY"
