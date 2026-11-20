@@ -350,7 +350,7 @@ manifest["status"] = "passed"
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(manifest, f, indent=2)
-    f.write("\\n")
+    f.write("\n")
 PY_MANIFEST
 
 echo "deployment manifest: $RECEIPT"
